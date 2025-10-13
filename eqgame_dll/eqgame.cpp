@@ -32,7 +32,6 @@
 #define BYTE2(x) BYTEn(x, 1)
 //#include "Common.h"
 
-#define FREE_THE_MOUSE
 //#define GM_MODE
 //#define LOGGING
 //#define RACE_LOGGING 1
@@ -50,11 +49,6 @@ bool title_set = false;
 std::string new_title("");
 bool first_maximize = true;
 bool can_fullscreen = false;
-bool ignore_right_click = false;
-bool ignore_right_click_up = false;
-bool ignore_left_click = false;
-bool ignore_left_click_up = false;
-DWORD focus_regained_time = 0;
 
 bool ResolutionStored = false;
 DWORD resx = 0;
@@ -63,7 +57,6 @@ DWORD bpp = 0;
 DWORD refresh = 0;
 HMODULE eqmain_dll = 0;
 BOOL bExeChecksumrequested = 0;
-BOOL g_mouseWheelZoomIsEnabled = true;
 unsigned int g_buffWindowTimersFontSize = 3;
 bool has_focus = true;
 WINDOWINFO stored_window_info;
@@ -71,9 +64,6 @@ bool window_info_stored = false;
 WINDOWPLACEMENT g_wpPrev = { sizeof(g_wpPrev) };
 bool start_fullscreen = false;
 bool startup = true;
-POINT posPoint;
-DWORD o_MouseEvents = 0x0055B3B9;
-DWORD o_MouseCenter = 0x0055B722;
 
 bool g_bEnableBrownSkeletons = false;
 bool g_bEnableExtendedNameplates = true;
@@ -86,11 +76,6 @@ char PassWord[64];
 bool Rule_Buffstacking_Patch_Enabled = false;
 int Rule_Num_Short_Buffs = 0;
 int Rule_Max_Buffs = EQ_NUM_BUFFS;
-
-typedef signed int(__cdecl* ProcessGameEvents_t)();
-ProcessGameEvents_t return_ProcessGameEvents;
-ProcessGameEvents_t return_ProcessMouseEvent;
-//ProcessGameEvents_t return_SetMouseCenter;
 
 DWORD d3ddev = 0;
 DWORD eqgfxMod = 0;
@@ -240,90 +225,164 @@ void print_chat(const char* format, ...)
 	print_chat_internal(*(int*)0x809478, buffer, 0, true);
 }
 
-void __cdecl ResetMouseFlags() {
-#ifdef LOGGING
-	WriteLog("EQGAME: Resetting Mouse Flags");
-#endif
-	DWORD ptr = *(DWORD *)0x00809DB4;
-	if (ptr)
-	{
-		*(BYTE*)(ptr + 85) = 0;
-		*(BYTE*)(ptr + 86) = 0;
-		*(BYTE*)(ptr + 87) = 0;
-		*(BYTE*)(ptr + 88) = 0;
-	}
+// Mouse dinput function.
+const DWORD o_GetMouseDataRel = 0x0055B3B9;
+typedef signed int(__cdecl* GetMouseDataRel_t)();
+GetMouseDataRel_t return_GetMouseDataRel;
 
-	*(DWORD*)0x00809320 = 0;
-	*(DWORD*)0x0080931C = 0;
-	*(DWORD*)0x00809324 = 0;
-	*(DWORD*)0x00809328 = 0;
-	*(DWORD*)0x0080932C = 0;
+// Mouse state.
+POINT savedRMousePos = {0, 0};
+
+// Client mouse related globals.
+short* const g_mouse_x_abs_used_in_proc = (short*)0x00798580;
+short* const g_mouse_y_abs_used_in_proc = (short*)0x00798582;
+BYTE* const g_mouse_rmb_down_mouse_look = (BYTE*)0x007985ea;  // Set between rmb down to up.
+BYTE* const g_mouse_lmb_down_previous = (BYTE*)0x00798614;
+BYTE* const g_mouse_rmb_down_previous = (BYTE*)0x00798615;
+BYTE* const g_mouse_rmb_down_from_dinput = (BYTE*)0x00798616;
+BYTE* const g_mouse_lmb_down_from_dinput = (BYTE*)0x00798617;
+long* const g_mouse_scroll_delta_ticks = (long*)0x007b9640;
+long* const g_mouse_x_abs_from_dinput_state = (long*)0x008090a8;  // DINPUT state fetch object field.
+long* const g_mouse_y_abs_from_dinput_state = (long*)0x008090ac;
+long* const g_mouse_x_abs_from_dinput = (long*)0x008092e8;  // Internal accumulators.
+long* const g_mouse_y_abs_from_dinput = (long*)0x008092ec;
+short* const g_mouse_x_delta_from_dinput = (short*)0x008092f0;
+short* const g_mouse_y_delta_from_dinput = (short*)0x008092f4;
+
+long* const g_mouse_screen_mode = (long*)0x0063b918;
+short* const g_mouse_screen_rect_left = (short*)0x00798548;
+short* const g_mouse_screen_rect_top = (short*)0x0079854a;
+short* const g_mouse_screen_rect_right = (short*)0x0079854c;
+short* const g_mouse_screen_rect_bottom = (short*)0x0079854e;
+long* const g_mouse_screen_res_x = (long*)0x00798564;
+long* const g_mouse_screen_res_y = (long*)0x00798568;
+BYTE* const g_mouse_new_ui = (BYTE*)0x008092d8;
+
+// Sets all internal absolute mouse position state to (x,y).
+void SetGameMousePosition(int x, int y)
+{
+	*g_mouse_x_abs_from_dinput = x;
+	*g_mouse_y_abs_from_dinput = y;
+	*g_mouse_x_abs_from_dinput_state = x;
+	*g_mouse_y_abs_from_dinput_state = y;
+	*g_mouse_x_abs_used_in_proc = x;
+	*g_mouse_y_abs_used_in_proc = y;
 }
 
-void __cdecl ProcessAltState() {
-	if(GetForegroundWindow() == EQhWnd)
-	{
-		if(GetAsyncKeyState(VK_MENU)&0x8000) // alt key is pressed
-		{
-			DWORD ptr = *(DWORD *)0x00809DB4;
-			if (ptr)
-			{
-				*(BYTE*)(ptr + 87) = 1;
-			}
-			*(DWORD*)0x00799740 = 1;
-			*(DWORD*)0x0080932C = 1;
-		}
-		else
-		{
-			DWORD ptr = *(DWORD *)0x00809DB4;
-			if (ptr)
-			{
-				*(BYTE*)(ptr + 87) = 0;
-			}
-			*(DWORD*)0x00799740 = 0;
-			*(DWORD*)0x0080932C = 0;
-		}
-		if (GetAsyncKeyState(VK_CONTROL) & 0x8000) // ctrl key is pressed
-		{
-			DWORD ptr = *(DWORD *)0x00809DB4;
-			if (ptr)
-			{
-				*(BYTE*)(ptr + 86) = 1;
-			}
-			*(DWORD*)0x0079973C = 1;
-			*(DWORD*)0x00809320 = 1;
-		}
-		else
-		{
-			DWORD ptr = *(DWORD *)0x00809DB4;
-			if (ptr)
-			{
-				*(BYTE*)(ptr + 86) = 0;
-			}
-			*(DWORD*)0x0079973C = 0;
-			*(DWORD*)0x00809320 = 0;
-		}
-		if (GetAsyncKeyState(VK_SHIFT) & 0x8000) // shift key is pressed
-		{
-			DWORD ptr = *(DWORD *)0x00809DB4;
-			if (ptr)
-			{
-				*(BYTE*)(ptr + 85) = 1;
-			}
-			*(DWORD*)0x00799738 = 1;
-			*(DWORD*)0x0080931C = 1;
-		}
-		else
-		{
-			DWORD ptr = *(DWORD *)0x00809DB4;
-			if (ptr)
-			{
-				*(BYTE*)(ptr + 85) = 0;
-			}
-			*(DWORD*)0x00799738 = 0;
-			*(DWORD*)0x0080931C = 0;
-		}
+// Returns true if the mouse is over a visible client window.
+bool IsMouseOverClient(HWND hwnd)
+{
+	if (!::IsWindowVisible(hwnd))
+		return false;
+
+	POINT cursor;
+	::GetCursorPos(&cursor);           // This returns absolute screen x, y.
+	POINT offset = {0, 0};
+	::ClientToScreen(hwnd, &offset);
+	cursor.x -= offset.x;
+	cursor.y -= offset.y;
+	RECT rect;
+	::GetClientRect(hwnd, &rect);
+	return ::PtInRect(&rect, cursor);
+}
+
+// Setting enable allows the game to control the display or hiding of the game cursor.
+void SetInternalCursorEnable(bool enable)
+{
+	const int draw_cursor_jump_addr = 0x0053edef;
+	BYTE opcode = enable ? 0x75 : 0xEB;  // Toggle conditional vs unconditional jump past draw cursor.
+	if (*(BYTE*)draw_cursor_jump_addr != opcode)
+		PatchT(draw_cursor_jump_addr, opcode);
+}
+
+// Flushes the dinput mouse buffers and resets the mouse state.
+void ResetMouseUpdateValues() {
+	EQ_flush_mouse();  // Keeps the dinput buffer drained.
+
+	SetGameMousePosition(32767, 32767);  // Off-screen value that won't somehow 'misclick' on something.
+	*g_mouse_rmb_down_mouse_look = 0;  // Disable all other dinput related outputs and state.
+	*g_mouse_lmb_down_previous = 0;
+	*g_mouse_rmb_down_previous = 0;
+	*g_mouse_rmb_down_from_dinput = 0;
+	*g_mouse_lmb_down_from_dinput = 0;
+	*g_mouse_x_delta_from_dinput = 0;
+	*g_mouse_y_delta_from_dinput = 0;
+	*g_mouse_scroll_delta_ticks = 0;
+}
+
+bool IsWin32CursorVisible()
+{
+	CURSORINFO ci = {sizeof(CURSORINFO)};
+	return (::GetCursorInfo(&ci) && ((ci.flags & CURSOR_SHOWING) != 0));
+}
+
+// Hook into the eqw win32 cursor visibility call so that everyone responds correctly to wndproc events.
+typedef void(__cdecl* EQ_FUNCTION_TYPE_SetCursorVisibility)(int param);
+EQ_FUNCTION_TYPE_SetCursorVisibility SetCursorVisibility_Trampoline;
+void __cdecl SetCursorVisibility_Detour(int param) 
+{
+	SetEQhWnd();
+	bool over_client = IsMouseOverClient(EQhWnd);  // TODO TODO: Verify the utility of this.
+	SetCursorVisibility_Trampoline(!over_client);
+}
+
+// Make the win32 cursor visible and disable the internal game cursor.
+void SetWin32CursorMode() {
+	SetInternalCursorEnable(false);  // Hide internal cursor.
+	SetCursorVisibility_Trampoline(true);  // Call the eqw.dll function to make win32 cursor visible.
+}
+
+// Enable game control over the internal game cursor and hide the win32 cursor.
+void SetInternalCursorMode() {
+	SetInternalCursorEnable(true);   // Allow internal cursor to be visible.
+	SetCursorVisibility_Trampoline(false);
+}
+
+// Synchronizes the internal cursor position to the win32 cursor for smooth transitions.
+void SyncToWin32Cursor()
+{
+	EQ_flush_mouse();  // Clears dinput buffer and re-acquires.
+	POINT cursor;
+	GetCursorPos(&cursor);  // This returns absolute screen x, y.
+	POINT corner = {0}; 
+	ClientToScreen(EQhWnd, &corner);
+	cursor.x -= corner.x;
+	cursor.y -= corner.y;
+	if (!bWindowedMode) {  // In full screen mode the image may be scaled.
+		RECT rect;
+		::GetClientRect(EQhWnd, &rect);
+		bool mode = (*g_mouse_screen_mode == 1);  // Logic copied from SetMouseCenter.
+		int width = mode ? *g_mouse_screen_res_x : (*g_mouse_screen_rect_left + *g_mouse_screen_rect_right);
+		int height = mode ? *g_mouse_screen_res_y : (*g_mouse_screen_rect_top + *g_mouse_screen_rect_bottom);
+		cursor.x = cursor.x * width / (rect.right - rect.left);
+		cursor.y = cursor.y * height / (rect.bottom - rect.top);
 	}
+	SetGameMousePosition(cursor.x, cursor.y);
+}
+
+// Synchronizes the win32 cursor to the internal cursor position.
+void SetWin32CursorToClientPosition(POINT pt)
+{
+	ClientToScreen(EQhWnd, &pt);  // Note: For simplicity ignoring full screen scaling here.
+	SetCursorPos(pt.x, pt.y);
+
+}
+
+// Sets the internal cursor location and synchronizes the win32 cursor with it.
+void SetMouseCursorClientPosition(POINT pt) 
+{
+	SetGameMousePosition(pt.x, pt.y);
+	SetWin32CursorToClientPosition(pt);
+}
+
+// Sets the internal cursor location to the middle of the screen.
+void SetMouseCursorToCenter() 
+{
+	bool mode = (*g_mouse_screen_mode == 1);  // Logic copied from SetMouseCenter.
+	int width = mode ? *g_mouse_screen_res_x : (*g_mouse_screen_rect_left + *g_mouse_screen_rect_right);
+	int height = mode ? *g_mouse_screen_res_y : (*g_mouse_screen_rect_top + *g_mouse_screen_rect_bottom);
+	POINT center = {width / 2, height / 2};
+	SetMouseCursorClientPosition(center);
 }
 
 void AddDetourf(DWORD address, ...)
@@ -356,11 +415,90 @@ void AddDetourf(DWORD address, ...)
 bool CtrlPressed() {
 	return *(DWORD*)0x00809320 > 0;
 }
+
+void SetCtrlKeyState(bool down)
+{
+	*(DWORD*)0x0079973C = down;
+	*(DWORD*)0x00809320 = down;
+	DWORD ptr = *(DWORD *)0x00809DB4;
+	if (ptr)
+		*(BYTE*)(ptr + 86) = down;
+}
+
 bool AltPressed() {
 	return *(DWORD*)0x0080932C > 0;
 }
+
+void SetAltKeyState(bool down)
+{
+	*(DWORD*)0x00799740 = down;
+	*(DWORD*)0x0080932C = down;
+	DWORD ptr = *(DWORD *)0x00809DB4;
+	if (ptr) {
+		*(BYTE*)(ptr + 87) = down;  // Left Alt
+		*(BYTE*)(ptr + 88) = 0;	    // Right Alt
+	}
+}
+
 bool ShiftPressed() {
 	return *(DWORD*)0x0080931C > 0;
+}
+
+void SetShiftKeyState(bool down)
+{
+	*(DWORD*)0x00799738 = down;
+	*(DWORD*)0x0080931C = down;
+	DWORD ptr = *(DWORD *)0x00809DB4;
+	if (ptr)
+		*(BYTE*)(ptr + 85) = down;
+}
+
+void SetCapsLockState(bool down)
+{
+	*(DWORD*)0x00809324 = down;
+	DWORD ptr = *(DWORD *)0x00809DB4;
+	if (ptr)
+		*(BYTE*)(ptr + 84) = down;
+}
+
+void UpdateModifierKeyStates() {
+  bool in_foreground = (GetForegroundWindow() == EQhWnd);
+	SetAltKeyState(in_foreground && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0);
+	SetCtrlKeyState(in_foreground && (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0);
+	SetShiftKeyState(in_foreground && (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0);
+	SetCapsLockState(in_foreground && (GetAsyncKeyState(VK_CAPITAL) & 0x8000) != 0);
+}
+
+void ResetKeyboardFlags(bool perform_update_query) {
+#ifdef LOGGING
+	WriteLog("EQGAME: Resetting Keyboard Flags");
+#endif
+
+	SetAltKeyState(false);
+	SetCtrlKeyState(false);
+	SetShiftKeyState(false);
+	SetCapsLockState(false);
+	*(DWORD*)0x00809328 = 0;  // Num lock state
+
+	if (perform_update_query)
+		UpdateModifierKeyStates();
+}
+
+void HandleInputGainOfFocus() {
+	ResetKeyboardFlags(true);
+
+	if (IsMouseOverClient(EQhWnd)) {
+		SetInternalCursorMode();  // Hides win32 and enables internal.
+		SyncToWin32Cursor();
+	}
+	else {
+		SetWin32CursorMode();  // Makes the win32 cursor visible and hides internal.
+	}
+}
+
+void HandleInputLossOfFocus() {
+	// Leave mouse cursor alone (we don't own it anymore and will fix in gain of focus).
+	ResetKeyboardFlags(false);
 }
 
 // Helper - Executes all callbacks in 'OnZoneCallbacks'
@@ -713,11 +851,11 @@ public:
 		return CEverQuest__HandleWorldMessage_Trampoline(con,Opcode,Buffer,len);
 	}
 
-	int __cdecl  CDisplay__Process_Events_Trampoline();
-	int __cdecl  CDisplay__Process_Events_Detour(){
+	int __cdecl ProcessMouseAndGetKey_Trampoline();
+	int __cdecl ProcessMouseAndGetKey_Detour(){
 		if (EQ_OBJECT_CEverQuest != NULL && EQ_OBJECT_CEverQuest->GameState > 0 && EQ_OBJECT_CEverQuest->GameState != 255 && can_fullscreen) {
 			SetEQhWnd();
-			ProcessAltState();
+			ResetKeyboardFlags(true);
 			if (!ResolutionStored && *(DWORD*)(0x007F97D0) != 0)
 			{
 				DWORD ptr = *(DWORD*)(0x007F97D0);
@@ -730,7 +868,7 @@ public:
 				ResolutionStored = true;
 				eqgfxMod = *(DWORD*)(0x007F9C50);
 				d3ddev = (DWORD)(eqgfxMod + 0x00A4F92C);
-#ifdef LOGGING
+	#ifdef LOGGING
 				std::string outstring;
 				outstring = "EQGAME: Resolution Stored: resx = ";
 				outstring += std::to_string(resx);
@@ -741,13 +879,13 @@ public:
 				outstring += " refresh = ";
 				outstring += std::to_string(refresh);
 				WriteLog(outstring);
-#endif
+	#endif
 			}
 			
 			if (ResolutionStored && startup && GetForegroundWindow() == EQhWnd && !IsIconic(EQhWnd)) {
-#ifdef LOGGING
+	#ifdef LOGGING
 				WriteLog("EQGAME: Startup - Storing window info");
-#endif
+	#endif
 				GetWindowInfo(EQhWnd, &stored_window_info);
 				window_info_stored = true;
 				startup = false;
@@ -765,27 +903,27 @@ public:
 					start_fullscreen = false;
 					WriteLog("Startup - Monitor resolution does not match game - blocking auto full screen");
 				}
-#ifdef LOGGING
+	#ifdef LOGGING
 				std::string outstring;
 				outstring = "Monitor Info: resx = ";
 				outstring += std::to_string(monitor_x);
 				outstring += " resy = ";
 				outstring += std::to_string(monitor_y);
 				WriteLog(outstring);
-#endif
+	#endif
 
 				*/
 
 			}
 			if (start_fullscreen && bWindowedMode && GetForegroundWindow() == EQhWnd && !IsIconic(EQhWnd)) {
 				// This takes if fullscreen initially
-#ifdef LOGGING
+	#ifdef LOGGING
 				WriteLog("EQGAME: Going Fullscreen (1)");
-#endif
+	#endif
 				if (!window_info_stored) {
-#ifdef LOGGING
+	#ifdef LOGGING
 					WriteLog("EQGAME: Storing Window Info (1)");
-#endif
+	#endif
 					GetWindowInfo(EQhWnd, &stored_window_info);
 					window_info_stored = true;
 				}
@@ -812,9 +950,9 @@ public:
 					SetWindowPlacement(EQhWnd, &window_placement);
 					window_placement.showCmd = SW_MAXIMIZE;
 					SetWindowPlacement(EQhWnd, &window_placement);
-#ifdef LOGGING
+	#ifdef LOGGING
 					WriteLog("EQGAME: Going Fullscreen First Maximize (2)");
-#endif
+	#endif
 				}
 				SetWindowPos(EQhWnd, HWND_TOP, window_rect.left, window_rect.top,
 					window_rect.right - window_rect.left, window_rect.bottom - window_rect.top,
@@ -825,12 +963,11 @@ public:
 			}
 			if (GetForegroundWindow() == EQhWnd && !IsIconic(EQhWnd)) {
 				if (!has_focus) {
-#ifdef LOGGING
+	#ifdef LOGGING
 					WriteLog("EQGAME: Window Regained focus after lost focus.");
-#endif
-					focus_regained_time = GetTickCount();
-					ResetMouseFlags();
-					while (ShowCursor(FALSE) >= 0);
+	#endif
+					HandleInputGainOfFocus();  // Updates mouse, cursor, and keyboard.
+
 					// regained focus
 					if (ResolutionStored) {
 						if (heqwMod) {
@@ -840,9 +977,9 @@ public:
 							//sprintf(str, "TestCoop = %d", result);
 							//MessageBox(NULL, str, NULL, MB_OK);
 							if (result == -2005530519 || result == -2005530520) {
-#ifdef LOGGING
+	#ifdef LOGGING
 								WriteLog("EQGAME: d3d device failed - reinitializing 3d device");
-#endif
+	#endif
 								*(DWORD*)0x005FE990 = resx;
 								*(DWORD*)0x005FE994 = resy;
 								*(DWORD*)0x005FE998 = bpp;
@@ -862,9 +999,9 @@ public:
 				}
 				if (!ResolutionStored && *(DWORD*)(0x007F97D0) != 0)
 				{
-#ifdef LOGGING
+	#ifdef LOGGING
 					WriteLog("EQGAME: Storing Resolution Info (2)");
-#endif
+	#endif
 					DWORD ptr = *(DWORD*)(0x007F97D0);
 
 					resx = *(DWORD*)(ptr + 0x7A28);
@@ -881,27 +1018,22 @@ public:
 			}
 			else {
 				if (has_focus) {
-#ifdef LOGGING
+	#ifdef LOGGING
 					WriteLog("EQGAME: Lost focus of window.  Different process in foreground.");
-#endif
-					ResetMouseFlags();
-					ignore_right_click = true;
-					ignore_left_click = true;
-					focus_regained_time = 0;
-					while (ShowCursor(TRUE) < 0);
+	#endif
+					HandleInputLossOfFocus();
 				}
 				has_focus = false;
-				return 0;
 			}
 		}
 		else if (!bWindowedMode && EQ_OBJECT_CEverQuest == NULL) {
 			SetEQhWnd();
-			ProcessAltState();
+			ResetKeyboardFlags(true);
 			SetWindowLong(EQhWnd, GWL_STYLE, stored_window_info.dwStyle | WS_CAPTION );
 			SetWindowLong(EQhWnd, GWL_EXSTYLE, stored_window_info.dwExStyle);
-#ifdef LOGGING
+	#ifdef LOGGING
 			WriteLog("EQGAME: EQ Object found Null Dropping Fullscreen (1)");
-#endif
+	#endif
 			if (!IsIconic(EQhWnd) && window_info_stored) {
 				SetWindowPos(EQhWnd, HWND_TOP, stored_window_info.rcWindow.left, stored_window_info.rcWindow.top,
 					stored_window_info.rcWindow.right - stored_window_info.rcWindow.left, stored_window_info.rcWindow.bottom - stored_window_info.rcWindow.top,
@@ -913,12 +1045,9 @@ public:
 			first_maximize = true;
 		}
 		SetEQhWnd();
-		if (EQhWnd == GetForegroundWindow())
-		{
-			return CDisplay__Process_Events_Trampoline();
-		}
-		return 0;
+		return ProcessMouseAndGetKey_Trampoline();
 	}
+
 	int CDisplay__Render_World_Trampoline();
 	int CDisplay__Render_World_Detour()
 	{
@@ -960,7 +1089,7 @@ DETOUR_TRAMPOLINE_EMPTY(void WINAPI RightMouseUp_Trampoline(__int16, __int16));
 DETOUR_TRAMPOLINE_EMPTY(void WINAPI LeftMouseDown_Trampoline(__int16, __int16));
 DETOUR_TRAMPOLINE_EMPTY(void WINAPI LeftMouseUp_Trampoline(__int16, __int16));
 DETOUR_TRAMPOLINE_EMPTY(int Eqmachooks::CDisplay__Render_World_Trampoline());
-DETOUR_TRAMPOLINE_EMPTY(int __cdecl  Eqmachooks::CDisplay__Process_Events_Trampoline());
+DETOUR_TRAMPOLINE_EMPTY(int __cdecl  Eqmachooks::ProcessMouseAndGetKey_Trampoline());
 DETOUR_TRAMPOLINE_EMPTY(HWND WINAPI CreateWindowExA_Trampoline(DWORD,LPCSTR,LPCSTR,DWORD,int,int,int,int,HWND,HMENU,HINSTANCE,LPVOID));
 DETOUR_TRAMPOLINE_EMPTY(int __cdecl HandleMouseWheel_Trampoline(int));
 DETOUR_TRAMPOLINE_EMPTY(int sub_4F35E5_Trampoline()); // command line parsing
@@ -1037,41 +1166,38 @@ int __fastcall CEverQuest__DisplayScreen_Detour(DWORD* this_game, unsigned unuse
 	return CEverQuest__DisplayScreen_Trampoline(this_game, unused_edx, a1);
 }
 
+// This WndProc handler detours the client's login and play screen window handlers, not the eqw game screen.
+// It does get called internally by the client for a few cases (chat enter for example).
 LRESULT WINAPI WndProc_Detour(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
 	if (EQ_OBJECT_CEverQuest != NULL && Msg != 16) {
 
-		if (WM_WINDOWPOSCHANGED == Msg || WM_WINDOWPOSCHANGING == Msg || WM_NCCALCSIZE == Msg || WM_PAINT == Msg)
+	if (WM_WINDOWPOSCHANGED == Msg || WM_WINDOWPOSCHANGING == Msg ||
+		WM_NCCALCSIZE == Msg || WM_PAINT == Msg) {
+		return 0;
+	}
+
+	if (WM_SYSCOMMAND == Msg)
+	{
+		if (wParam == SC_MINIMIZE)
 		{
 			return 0;
 		}
-		
-		if (WM_SYSCOMMAND == Msg)
-		{
-			if (wParam == SC_MINIMIZE)
-			{
-				return 0;
-			}
-		}
-		
-		if (WM_ACTIVATE == Msg || WM_ACTIVATEAPP == Msg)
-		{
-			if (wParam) {
-				SetEQhWnd();
-				//if (in_full_screen)
-				//	start_fullscreen = true;
-				//else
-					 ShowWindow(EQhWnd, SW_SHOW);
-				
-				ResetMouseFlags();
-				while (ShowCursor(FALSE) >= 0);
-			}
-			else
-			{
-				ResetMouseFlags();
-				while (ShowCursor(TRUE) < 0);
-			}
-		}
+	}
 
+	if (WM_ACTIVATE == Msg || WM_ACTIVATEAPP == Msg)
+	{
+		if (wParam) {
+			SetEQhWnd();
+			//if (in_full_screen)
+			//	start_fullscreen = true;
+			//else
+			ShowWindow(EQhWnd, SW_SHOW);
+			HandleInputGainOfFocus();  // Updates mouse, cursor, and keyboard.
+		} else {
+			HandleInputLossOfFocus();  // Updates mouse, cursor, and keyboard.
+		}
+	}
+	
 		if (!bWindowedMode || start_fullscreen) {
 			SetEQhWnd();
 			if (EQ_OBJECT_CEverQuest->GameState > 0 && EQ_OBJECT_CEverQuest->GameState != 255 && can_fullscreen) {
@@ -1522,93 +1648,25 @@ int sub_4F35E5_Detour(){
 	return sub_4F35E5_Trampoline();
 }
 
-extern bool mouse_looking;
-extern POINT savedRMousePos;
-
 void WINAPI RightMouseUp_Detour(__int16 a1, __int16 a2) {
-	if (ignore_right_click_up)
-		return;
+	bool mouse_look_active = *g_mouse_rmb_down_mouse_look;
+	RightMouseUp_Trampoline(a1, a2);
 
-	return RightMouseUp_Trampoline(a1, a2);
+	// The clamp during mouse_look keeps the cursor in the enter to avoid boundary glitching, and the
+	// call above also puts it in the middle so we restore the starting state when it exits mouse_look.
+	if (mouse_look_active && !*g_mouse_rmb_down_mouse_look)
+		SetMouseCursorClientPosition(savedRMousePos);  // Set the cursor position to the locked state.
 }
 
 void WINAPI RightMouseDown_Detour(__int16 a1, __int16 a2) {
-
-	if (ignore_right_click) {
-		if (!(GetAsyncKeyState(VK_RBUTTON) & 0x8000)) {
-			if (has_focus && focus_regained_time > 0) {
-				if ((GetTickCount() - focus_regained_time) > 10) {
-					ignore_right_click_up = false;
-					ignore_right_click = false;
-					ignore_left_click_up = false;
-					ignore_left_click = false;
-					focus_regained_time = 0;
-				}
-				else {
-					ignore_right_click_up = true;
-					return;
-				}
-			}
-			else {
-				ignore_right_click_up = true;
-				return;
-			}
-		}
-		else {
-			ignore_right_click = false;
-			ignore_right_click_up = false;
-		}
-	}
-
 	RightMouseDown_Trampoline(a1, a2);
-	if(EQ_OBJECT_CEverQuest != NULL && EQ_OBJECT_CEverQuest->GameState == 5) {
-		if (*(DWORD*)0x007985EA == 0x00010001) {
-			mouse_looking = true;
-			if (savedRMousePos.x == 0 && savedRMousePos.y == 0)
-			{
-				savedRMousePos.x = *(DWORD*)0x008092E8;
-				savedRMousePos.y = *(DWORD*)0x008092EC;
-			}
-		}
+	// The call above updates the mouse_look state and this call only happens upon the RMB down event so
+	// we capture the abs values here to clamp the mouse position in future updates. The values are
+	// clamped to within the client region.
+	if (*g_mouse_rmb_down_mouse_look) {
+		savedRMousePos.x = *g_mouse_x_abs_from_dinput;  // These values are clamped to within the screen res.
+		savedRMousePos.y = *g_mouse_y_abs_from_dinput;
 	}
-	return;
-}
-
-void WINAPI LeftMouseUp_Detour(__int16 a1, __int16 a2) {
-	if (ignore_left_click_up)
-		return;
-
-	return LeftMouseUp_Trampoline(a1, a2);
-}
-
-void WINAPI LeftMouseDown_Detour(__int16 a1, __int16 a2) {
-
-	if (ignore_left_click) {
-		if (!(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) {
-			if (has_focus && focus_regained_time > 0) {
-				if ((GetTickCount() - focus_regained_time) > 10) {
-					ignore_left_click_up = false;
-					ignore_left_click = false;
-					ignore_right_click_up = false;
-					ignore_right_click = false;
-					focus_regained_time = 0;
-				}
-				else {
-					ignore_left_click_up = true;
-					return;
-				}
-			}
-			else {
-				ignore_left_click_up = true;
-				return;
-			}
-		}
-		else {
-			ignore_left_click = false;
-			ignore_left_click_up = false;
-		}
-	}
-	return LeftMouseDown_Trampoline(a1, a2);
 }
 
 int __cdecl HandleMouseWheel_Detour(int a1) {
@@ -1625,7 +1683,7 @@ int __cdecl HandleMouseWheel_Detour(int a1) {
 		}
 		EQMACMQ_DoMouseWheelZoom(a1);
 
-		if (!*(BYTE*)0x8092D8);
+		if (!*(BYTE*)0x8092D8)
 			return 0;
 	}
 	return HandleMouseWheel_Trampoline(a1);
@@ -2001,7 +2059,7 @@ void __fastcall EQPlayer__MountEQPlayer_Detour(EQSPAWNINFO* this_ptr, int unused
 	cdisplay[0xA0] = display_0xA0;
 }
 
-// Horse Tilt
+// Horse Tilt and keeping other player positions synchronized with the mount.
 typedef void(__cdecl* EQ_FUNCTION_TYPE_ProcessPhysics)(EQSPAWNINFO* ent, int* EQMissile, DWORD* EQEffect);
 EQ_FUNCTION_TYPE_ProcessPhysics ProcessPhysics_Trampoline;
 void __cdecl ProcessPhysics_Detour(EQSPAWNINFO* ent, int* missile, DWORD* effect)
@@ -2631,20 +2689,6 @@ int __cdecl CityCanStart_Detour(int a1, int a2, int a3, int a4) {
 	return CityCanStart_Trampoline(a1, a2, a3, a4);
 }
 
-int __cdecl ProcessKeyUp_Detour(int a1)
-{
-#ifdef LOGGING
-	std::string outstring;
-	outstring = "EQGAME: KeyPress Up = ";
-	outstring += std::to_string(a1);
-	WriteLog(outstring);
-#endif
-	if (!has_focus || has_focus && ((GetTickCount() - focus_regained_time) <= 10))
-		return ProcessKeyUp_Trampoline(0x00);
-
-	return ProcessKeyUp_Trampoline(a1);
-}
-
 int __cdecl ProcessKeyDown_Detour(int a1)
 {
 #ifdef LOGGING
@@ -2653,9 +2697,6 @@ int __cdecl ProcessKeyDown_Detour(int a1)
 	outstring += std::to_string(a1);
 	WriteLog(outstring);
 #endif
-
-	if (!has_focus || has_focus && ((GetTickCount() - focus_regained_time) <= 10))
-		return ProcessKeyDown_Trampoline(0x00);
 
 	SetEQhWnd();
 	if (EQ_OBJECT_CEverQuest != NULL && can_fullscreen && EQ_OBJECT_CEverQuest->GameState > 0 && a1 == 0x1c && AltPressed() && !ShiftPressed() && !CtrlPressed()) {
@@ -2667,7 +2708,7 @@ int __cdecl ProcessKeyDown_Detour(int a1)
 #ifdef LOGGING
 			WriteLog("EQGAME: Currently in windowed mode.");
 #endif
-			ResetMouseFlags();
+			ResetKeyboardFlags(false);
 
 			// store window positions
 			if (!window_info_stored) {
@@ -2713,7 +2754,6 @@ int __cdecl ProcessKeyDown_Detour(int a1)
 		}
 		else
 		{
-			//ResetMouseFlags();
 #ifdef LOGGING
 			WriteLog("EQGAME: Currently in full screen mode.");
 #endif
@@ -2832,132 +2872,67 @@ DWORD WINAPI WritePrivateProfileStringA_detour(LPCSTR lpAppName, LPCSTR lpKeyNam
 	return ret;
 }
 
-
-const bool IsMouseOverWindow(HWND hWnd, const int mx, const int my,
-	const bool inClientSpace /*= false */)
+// This hook handles windowed mode support for the mouse. There are two primary states:
+// - The window has lost focus or the cursor is out of the client space
+//  - Mouse inputs are ignored and win32 cursor is visible
+// - The cursor is over the client space (or rmb is down and crossing the edge)
+//  - Mouse inputs are active and the game cursor is enabled
+unsigned int __cdecl GetMouseDataRel_Hook()
 {
-	if (!IsWindowVisible(hWnd))
-		return false;
+ 	static bool mouse_disabled = true;
+	SetEQhWnd();  // Ensure EQhWnd is up to date pointing at correct handle.
 
-	RECT windowRect;
-
-	// Get the window in screen space
-	::GetWindowRect(hWnd, &windowRect);
-
-	if (inClientSpace)
-	{
-		POINT offset;
-		offset.x = offset.y = 0;
-		ClientToScreen(hWnd, &offset);
-
-		// Offset the window to client space
-		windowRect.left -= offset.x;
-		windowRect.top -= offset.y;
-		// NOTE: left and top should now be 0, 0
-		windowRect.right -= offset.x;
-		windowRect.bottom -= offset.y;
+	bool has_focus = (GetForegroundWindow() == EQhWnd && !IsIconic(EQhWnd));
+	bool over_client = IsMouseOverClient(EQhWnd);
+	bool internal_mode = has_focus && (over_client || *g_mouse_rmb_down_mouse_look);
+	if (internal_mode) {
+		if (IsWin32CursorVisible())
+			SetInternalCursorMode();  // Hides win32 and enables internal.
+	}
+	else {
+		if (!IsWin32CursorVisible())
+			SetWin32CursorMode();  // Makes the win32 cursor visible and hides internal.
+		mouse_disabled = true;
+		ResetMouseUpdateValues();  // Drains the buffers and blanks the outputs.
+		return 0;
 	}
 
-	// Test if mouse over window
-	POINT cursorPos = { mx, my };
-	return PtInRect(&windowRect, cursorPos);
+	if (mouse_disabled) {
+		mouse_disabled = false;
+		SyncToWin32Cursor();  // Updates internal cursor position to match win32.
+	}
+
+	unsigned int result = return_GetMouseDataRel();
+
+  // Handle button swap option.
+  if (!RightHandMouse) {
+		BYTE temp = *g_mouse_rmb_down_from_dinput;
+		*g_mouse_rmb_down_from_dinput =	*g_mouse_lmb_down_from_dinput;
+		*g_mouse_lmb_down_from_dinput = temp;
+	}
+
+	// Lock the mouse to the middle if mouse_look is active to avoid glitching across the window edge.
+	if (*g_mouse_rmb_down_mouse_look) {
+		SetMouseCursorToCenter();
+	}
+	else {
+		// The call above includes a mouse sensitivity factor that makes the win32 cursor position get out of sync
+		// with the internal tracking. This can cause discontinuities when crossing the window borders. To solve
+		// this, synchronize the win32 cursor when the directinput one is not clamped (allow crossing when clamped).
+		bool use_fixed_resolution = (*g_mouse_new_ui == 0) && (*g_mouse_screen_mode != 2);
+		int screen_res_x = use_fixed_resolution ? 629 : *g_mouse_screen_res_x;
+		int screen_rex_y = use_fixed_resolution ? 460 : *g_mouse_screen_res_y;
+		int x = *g_mouse_x_abs_from_dinput;
+		int y = *g_mouse_y_abs_from_dinput;
+		bool x_clamped = (x == 0 || x == screen_res_x - 1); 
+		bool y_clamped = (y == 0 || y == screen_rex_y - 1); 
+		if (!x_clamped && !y_clamped) 
+			SetWin32CursorToClientPosition(POINT{x, y});
+	}
+
+	return result;
 }
 
-signed int __cdecl ProcessMouseEvent_Hook()
-{
-	bool shouldRetEarly = false;
-	signed int ret = 0;
-
-	SetEQhWnd();
-
-#ifdef FREE_THE_MOUSE
-	POINT p;
-	GetCursorPos(&p);
-	BYTE dval = *(BYTE*)0x007985EA;
-
-	if (dval == 0) {
-		if (!IsMouseOverWindow(EQhWnd, p.x, p.y, false))
-		{
-			EQ_flush_mouse();
-			EQ_SetMousePosition(32767, 32767);
-			while (ShowCursor(FALSE) >= 0);
-			if (posPoint.x == 0 && posPoint.y == 0)
-			{
-				return ret;
-			}
-		}
-		// we have stored cursor positions
-		// restore cursor to previous position
-		if (posPoint.x != 0 && posPoint.y != 0 && (GetForegroundWindow() == EQhWnd))
-		{
-			POINT pt;
-			pt.x = posPoint.x;
-			pt.y = posPoint.y;
-			ClientToScreen(EQhWnd, &pt);
-			SetCursorPos(pt.x, pt.y);
-			EQ_SetMousePosition(posPoint.x, posPoint.y);
-			posPoint.x = 0;
-			posPoint.y = 0;
-			shouldRetEarly = true;
-			while (ShowCursor(TRUE) < 0);
-		}
-	}
-#endif
-
-	ret = return_ProcessMouseEvent();
-
-	if (!RightHandMouse) {
-		*(BYTE*)0x00798616 = BYTE1(*(DWORD*)0x8090B4) != 0;
-		*(BYTE*)0x00798617 = BYTE2(*(DWORD*)0x8090B4) != 0;
-	}
-
-
-	if (mouse_looking && (GetForegroundWindow() == EQhWnd))
-	{
-		if (savedRMousePos.x != 0 && savedRMousePos.y != 0)
-		{
-			POINT pt;
-			pt.x = savedRMousePos.x;
-			pt.y = savedRMousePos.y;
-			ClientToScreen(EQhWnd, &pt);
-			SetCursorPos(pt.x, pt.y);
-			EQ_SetMousePosition(savedRMousePos.x, savedRMousePos.y);
-		}
-	}
-	else if (!mouse_looking || (GetForegroundWindow() != EQhWnd))
-	{
-		savedRMousePos.x = 0;
-		savedRMousePos.y = 0;
-	}
-
-#ifdef FREE_THE_MOUSE
-	if (shouldRetEarly)
-	{
-		return ret;
-	}
-	if (EQhWnd)
-	{
-		if (ScreenToClient(EQhWnd, &p))
-		{
-			if (dval == 0)
-			{
-				*(DWORD*)0x008092E8 = p.x;
-				*(DWORD*)0x008092EC = p.y;
-			}
-			else
-			{
-				if (posPoint.x == 0 && posPoint.y == 0)
-				{
-					posPoint.x = *(DWORD*)0x008092E8;
-					posPoint.y = *(DWORD*)0x008092EC;
-					while (ShowCursor(FALSE) >= 0);
-				}
-			}
-		}
-	}
-#endif
-	return ret;
-}
 
 void InitRaceShortCodeMap()
 {
@@ -2992,24 +2967,6 @@ void InitRaceShortCodeMap()
 	}
 }
 
-/*signed int __cdecl SetMouseCenter_Hook()//55B722
-{
-	signed int retval = return_SetMouseCenter();
-	if (EQhWnd)
-	{
-		RECT windowRect;
-		::GetWindowRect(EQhWnd, &windowRect);
-		int width = windowRect.right - windowRect.left;
-		int height = windowRect.bottom - windowRect.top;
-		POINT pt;
-		pt.x = posPoint.x;
-		pt.y = posPoint.y;
-		ClientToScreen(EQhWnd, &pt);
-		SetCursorPos(pt.x, pt.y);
-
-	}
-	return retval;
-}*/
 extern void LoadIniSettings();
 
 int __fastcall EQMACMQ_DETOUR_CEverQuest__InterpretCmd(void* this_ptr, void* not_used, class EQPlayer* a1, char* a2)
@@ -5228,6 +5185,10 @@ void InitHooks()
 	// Supports additional labels (Song Window, for now). Zeal handles most others.
 	GetLabelFromEQ_Trampoline = (EQ_FUNCTION_TYPE_GetLabelFromEQ)DetourFunction((PBYTE)0x436680, (PBYTE)GetLabelFromEQ_Detour);
 
+	HMODULE eqw_base = GetModuleHandleA("eqw.dll");  // Requires an eqw.dll with fixed offset for method.
+	int SetCursorVisibilityAddr = (int)eqw_base + 0x16e0;
+	SetCursorVisibility_Trampoline = (EQ_FUNCTION_TYPE_SetCursorVisibility)DetourFunction((PBYTE)SetCursorVisibilityAddr, (PBYTE)SetCursorVisibility_Detour);
+
 	// Helper hooks that run callbacks
 	EnterZone_Trampoline = (EQ_FUNCTION_TYPE_EnterZone)DetourFunction((PBYTE)0x53D2C4, (PBYTE)EnterZone_Detour); // OnZone callbacks
 	HandleSpawnAppearanceMessage_Trampoline = (EQ_FUNCTION_TYPE_HandleSpawnAppearanceMessage)DetourFunction((PBYTE)0x004DF52A, (PBYTE)HandleSpawnAppearanceMessage_Detour); // OnSpawnAppearance(256) callbacks
@@ -5298,7 +5259,7 @@ void InitHooks()
 
 	SetPvpLevelRange(100, 0);
 
-	return_ProcessMouseEvent = (ProcessGameEvents_t)DetourFunction((PBYTE)o_MouseEvents, (PBYTE)ProcessMouseEvent_Hook);
+	return_GetMouseDataRel = (GetMouseDataRel_t)DetourFunction((PBYTE)o_GetMouseDataRel, (PBYTE)GetMouseDataRel_Hook);
 	//return_SetMouseCenter = (ProcessGameEvents_t)DetourFunction((PBYTE)o_MouseCenter, (PBYTE)SetMouseCenter_Hook);
 
 	eqgfxMod = *(DWORD*)(0x007F9C50);
@@ -5307,12 +5268,9 @@ void InitHooks()
 	EzDetour(0x0055A4F4, WndProc_Detour, WndProc_Trampoline);
 	// This detours key press down handler, so we can capture alt-enter to switch video modes
 	EzDetour(EQ_FUNCTION_ProcessKeyDown, ProcessKeyDown_Detour, ProcessKeyDown_Trampoline);
-	EzDetour(EQ_FUNCTION_ProcessKeyUp, ProcessKeyUp_Detour, ProcessKeyUp_Trampoline);
-	
+		
 	EzDetour(EQ_FUNCTION_CEverQuest__RMouseDown, RightMouseDown_Detour, RightMouseDown_Trampoline);
 	EzDetour(EQ_FUNCTION_CEverQuest__RMouseUp, RightMouseUp_Detour, RightMouseUp_Trampoline);
-	EzDetour(EQ_FUNCTION_CEverQuest__LMouseDown, LeftMouseDown_Detour, LeftMouseDown_Trampoline);
-	EzDetour(EQ_FUNCTION_CEverQuest__LMouseUp, LeftMouseUp_Detour, LeftMouseUp_Trampoline);
 	EzDetour(0x004FA8C5, do_quit_Detour, do_quit_Trampoline);
 	
 	//EzDetour(0x00559BF4, GetCpuTicks2_Detour, GetCpuTicks2_Trampoline);
@@ -5335,7 +5293,7 @@ void InitHooks()
 
 	//this one is here for eqplaynice - eqmule
 
-	EzDetour(0x0055AFE2, &Eqmachooks::CDisplay__Process_Events_Detour, &Eqmachooks::CDisplay__Process_Events_Trampoline);
+	EzDetour(0x0052437f, &Eqmachooks::ProcessMouseAndGetKey_Detour, &Eqmachooks::ProcessMouseAndGetKey_Trampoline);
 
 	EzDetour(EQ_FUNCTION_HandleMouseWheel, HandleMouseWheel_Detour, HandleMouseWheel_Trampoline);
 	// for command line parsing
@@ -5436,7 +5394,6 @@ void ExitHooks()
 	//RemoveDetour(0x4F2ED0); // SendExeChecksum
 	//RemoveDetour(0x40F3E0);
 	//RemoveDetour(cwAddress);
-	//RemoveDetour(0x55AFE2); // ProcessEvents
 	//RemoveDetour(EQ_FUNCTION_ProcessKeyDown); // process key down
 	//RemoveDetour(EQ_FUNCTION_ProcessKeyUp); // process key up
 	//RemoveDetour(EQ_FUNCTION_CEverQuest__RMouseDown);

@@ -32,8 +32,6 @@ PMOUSECLICK EQADDR_MOUSECLICK=(PMOUSECLICK)0x798614;
 BOOL gMouseLeftClickInProgress = FALSE;
 BOOL gMouseRightClickInProgress = FALSE;
 
-POINT savedRMousePos = POINT();
-
 #define FPS_ABSOLUTE  0
 #define FPS_CALCULATE 1
 
@@ -163,19 +161,9 @@ VOID ProcessFrame()
 	}
 }
 
-bool mouse_looking = false;
-
 void Pulse()
 {
 	*(DWORD*)0x008063D0 = 0;
-
-	if (*(DWORD *)0x007985EA == 0x00010001) {
-		mouse_looking = true;
-	}
-	else
-	{
-		mouse_looking = false;
-	}
 
 	SetEQhWnd();
 
