@@ -339,9 +339,10 @@ void SetInternalCursorMode() {
 }
 
 // Synchronizes the internal cursor position to the win32 cursor for smooth transitions.
-void SyncToWin32Cursor()
+void SyncToWin32Cursor(bool flush = true)
 {
-	EQ_flush_mouse();  // Clears dinput buffer and re-acquires.
+	if (flush)
+		EQ_flush_mouse();  // Clears dinput buffer and re-acquires.
 	POINT cursor;
 	GetCursorPos(&cursor);  // This returns absolute screen x, y.
 	POINT corner = {0}; 
@@ -363,9 +364,22 @@ void SyncToWin32Cursor()
 // Synchronizes the win32 cursor to the internal cursor position.
 void SetWin32CursorToClientPosition(POINT pt)
 {
-	ClientToScreen(EQhWnd, &pt);  // Note: For simplicity ignoring full screen scaling here.
-	SetCursorPos(pt.x, pt.y);
+	if (bWindowedMode) {
+		ClientToScreen(EQhWnd, &pt);
+	}
+	else {
+		RECT rect;
+		::GetClientRect(EQhWnd, &rect);
+		POINT corner = {0}; 
+		ClientToScreen(EQhWnd, &corner);
+		bool mode = (*g_mouse_screen_mode == 1);  // Logic copied from SetMouseCenter.
+		int width = mode ? *g_mouse_screen_res_x : (*g_mouse_screen_rect_left + *g_mouse_screen_rect_right);
+		int height = mode ? *g_mouse_screen_res_y : (*g_mouse_screen_rect_top + *g_mouse_screen_rect_bottom);
+		pt.x = pt.x * (rect.right - rect.left) / width + corner.x;
+		pt.y = pt.y * (rect.bottom - rect.top) / height + corner.y;
+	}
 
+	SetCursorPos(pt.x, pt.y);
 }
 
 // Sets the internal cursor location and synchronizes the win32 cursor with it.
@@ -2916,6 +2930,9 @@ unsigned int __cdecl GetMouseDataRel_Hook()
 		SetMouseCursorToCenter();
 	}
 	else {
+#if 1
+		SyncToWin32Cursor(false);  // Override the internal absolute cursor position with the win32 cursor value.
+#else
 		// The call above includes a mouse sensitivity factor that makes the win32 cursor position get out of sync
 		// with the internal tracking. This can cause discontinuities when crossing the window borders. To solve
 		// this, synchronize the win32 cursor when the directinput one is not clamped (allow crossing when clamped).
@@ -2928,6 +2945,7 @@ unsigned int __cdecl GetMouseDataRel_Hook()
 		bool y_clamped = (y == 0 || y == screen_rex_y - 1); 
 		if (!x_clamped && !y_clamped) 
 			SetWin32CursorToClientPosition(POINT{x, y});
+#endif
 	}
 
 	return result;
