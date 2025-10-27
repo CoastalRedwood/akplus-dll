@@ -383,20 +383,20 @@ void SetWin32CursorToClientPosition(POINT pt)
 }
 
 // Sets the internal cursor location and synchronizes the win32 cursor with it.
-void SetMouseCursorClientPosition(POINT pt) 
+void SetBothCursorsToClientPosition(POINT pt) 
 {
 	SetGameMousePosition(pt.x, pt.y);
 	SetWin32CursorToClientPosition(pt);
 }
 
 // Sets the internal cursor location to the middle of the screen.
-void SetMouseCursorToCenter() 
+void SetWin32CursorToCenter() 
 {
 	bool mode = (*g_mouse_screen_mode == 1);  // Logic copied from SetMouseCenter.
 	int width = mode ? *g_mouse_screen_res_x : (*g_mouse_screen_rect_left + *g_mouse_screen_rect_right);
 	int height = mode ? *g_mouse_screen_res_y : (*g_mouse_screen_rect_top + *g_mouse_screen_rect_bottom);
 	POINT center = {width / 2, height / 2};
-	SetMouseCursorClientPosition(center);
+	SetWin32CursorToClientPosition(center);
 }
 
 void AddDetourf(DWORD address, ...)
@@ -1666,20 +1666,21 @@ void WINAPI RightMouseUp_Detour(__int16 a1, __int16 a2) {
 	bool mouse_look_active = *g_mouse_rmb_down_mouse_look;
 	RightMouseUp_Trampoline(a1, a2);
 
-	// The clamp during mouse_look keeps the cursor in the enter to avoid boundary glitching, and the
-	// call above also puts it in the middle so we restore the starting state when it exits mouse_look.
+	// The clamp during mouse_look keeps the win32 cursor in the enter to avoid boundary glitching,
+	// and the call above puts the game cursor in the the middle at the end, so we restore both to
+	// the starting state when it exits mouse_look.
 	if (mouse_look_active && !*g_mouse_rmb_down_mouse_look)
-		SetMouseCursorClientPosition(savedRMousePos);  // Set the cursor position to the locked state.
+		SetBothCursorsToClientPosition(savedRMousePos);
 }
 
 void WINAPI RightMouseDown_Detour(__int16 a1, __int16 a2) {
 	RightMouseDown_Trampoline(a1, a2);
 	// The call above updates the mouse_look state and this call only happens upon the RMB down event so
-	// we capture the abs values here to clamp the mouse position in future updates. The values are
-	// clamped to within the client region.
+	// we capture the abs values here to know the starting location of mouse look.
 	if (*g_mouse_rmb_down_mouse_look) {
 		savedRMousePos.x = *g_mouse_x_abs_from_dinput;  // These values are clamped to within the screen res.
 		savedRMousePos.y = *g_mouse_y_abs_from_dinput;
+ 		SetWin32CursorToCenter();  // Centered so we don't glitch off the window.
 	}
 }
 
@@ -2925,9 +2926,11 @@ unsigned int __cdecl GetMouseDataRel_Hook()
 		*g_mouse_lmb_down_from_dinput = temp;
 	}
 
-	// Lock the mouse to the middle if mouse_look is active to avoid glitching across the window edge.
 	if (*g_mouse_rmb_down_mouse_look) {
-		SetMouseCursorToCenter();
+		// Lock the game cursor to the initial position and the win32 cursor to the middle to avoid glitching
+		// across the window edge. This is a brute force alternative versus using ClipCapture() with wndproc.
+		SetGameMousePosition(savedRMousePos.x, savedRMousePos.y);
+		SetWin32CursorToCenter();
 	}
 	else {
 #if 1
