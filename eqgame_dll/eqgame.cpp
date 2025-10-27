@@ -462,7 +462,7 @@ void SetCapsLockState(bool down)
 }
 
 void UpdateModifierKeyStates() {
-  bool in_foreground = (GetForegroundWindow() == EQhWnd);
+	bool in_foreground = (GetForegroundWindow() == EQhWnd);
 	SetAltKeyState(in_foreground && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0);
 	SetCtrlKeyState(in_foreground && (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0);
 	SetShiftKeyState(in_foreground && (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0);
@@ -868,7 +868,7 @@ public:
 				ResolutionStored = true;
 				eqgfxMod = *(DWORD*)(0x007F9C50);
 				d3ddev = (DWORD)(eqgfxMod + 0x00A4F92C);
-	#ifdef LOGGING
+#ifdef LOGGING
 				std::string outstring;
 				outstring = "EQGAME: Resolution Stored: resx = ";
 				outstring += std::to_string(resx);
@@ -879,13 +879,13 @@ public:
 				outstring += " refresh = ";
 				outstring += std::to_string(refresh);
 				WriteLog(outstring);
-	#endif
+#endif
 			}
 			
 			if (ResolutionStored && startup && GetForegroundWindow() == EQhWnd && !IsIconic(EQhWnd)) {
-	#ifdef LOGGING
+#ifdef LOGGING
 				WriteLog("EQGAME: Startup - Storing window info");
-	#endif
+#endif
 				GetWindowInfo(EQhWnd, &stored_window_info);
 				window_info_stored = true;
 				startup = false;
@@ -903,27 +903,27 @@ public:
 					start_fullscreen = false;
 					WriteLog("Startup - Monitor resolution does not match game - blocking auto full screen");
 				}
-	#ifdef LOGGING
+#ifdef LOGGING
 				std::string outstring;
 				outstring = "Monitor Info: resx = ";
 				outstring += std::to_string(monitor_x);
 				outstring += " resy = ";
 				outstring += std::to_string(monitor_y);
 				WriteLog(outstring);
-	#endif
+#endif
 
 				*/
 
 			}
 			if (start_fullscreen && bWindowedMode && GetForegroundWindow() == EQhWnd && !IsIconic(EQhWnd)) {
 				// This takes if fullscreen initially
-	#ifdef LOGGING
+#ifdef LOGGING
 				WriteLog("EQGAME: Going Fullscreen (1)");
-	#endif
+#endif
 				if (!window_info_stored) {
-	#ifdef LOGGING
+#ifdef LOGGING
 					WriteLog("EQGAME: Storing Window Info (1)");
-	#endif
+#endif
 					GetWindowInfo(EQhWnd, &stored_window_info);
 					window_info_stored = true;
 				}
@@ -950,9 +950,9 @@ public:
 					SetWindowPlacement(EQhWnd, &window_placement);
 					window_placement.showCmd = SW_MAXIMIZE;
 					SetWindowPlacement(EQhWnd, &window_placement);
-	#ifdef LOGGING
+#ifdef LOGGING
 					WriteLog("EQGAME: Going Fullscreen First Maximize (2)");
-	#endif
+#endif
 				}
 				SetWindowPos(EQhWnd, HWND_TOP, window_rect.left, window_rect.top,
 					window_rect.right - window_rect.left, window_rect.bottom - window_rect.top,
@@ -963,9 +963,9 @@ public:
 			}
 			if (GetForegroundWindow() == EQhWnd && !IsIconic(EQhWnd)) {
 				if (!has_focus) {
-	#ifdef LOGGING
+#ifdef LOGGING
 					WriteLog("EQGAME: Window Regained focus after lost focus.");
-	#endif
+#endif
 					HandleInputGainOfFocus();  // Updates mouse, cursor, and keyboard.
 
 					// regained focus
@@ -977,9 +977,9 @@ public:
 							//sprintf(str, "TestCoop = %d", result);
 							//MessageBox(NULL, str, NULL, MB_OK);
 							if (result == -2005530519 || result == -2005530520) {
-	#ifdef LOGGING
+#ifdef LOGGING
 								WriteLog("EQGAME: d3d device failed - reinitializing 3d device");
-	#endif
+#endif
 								*(DWORD*)0x005FE990 = resx;
 								*(DWORD*)0x005FE994 = resy;
 								*(DWORD*)0x005FE998 = bpp;
@@ -999,9 +999,9 @@ public:
 				}
 				if (!ResolutionStored && *(DWORD*)(0x007F97D0) != 0)
 				{
-	#ifdef LOGGING
+#ifdef LOGGING
 					WriteLog("EQGAME: Storing Resolution Info (2)");
-	#endif
+#endif
 					DWORD ptr = *(DWORD*)(0x007F97D0);
 
 					resx = *(DWORD*)(ptr + 0x7A28);
@@ -1018,9 +1018,9 @@ public:
 			}
 			else {
 				if (has_focus) {
-	#ifdef LOGGING
+#ifdef LOGGING
 					WriteLog("EQGAME: Lost focus of window.  Different process in foreground.");
-	#endif
+#endif
 					HandleInputLossOfFocus();
 				}
 				has_focus = false;
@@ -1031,9 +1031,9 @@ public:
 			ResetKeyboardFlags(true);
 			SetWindowLong(EQhWnd, GWL_STYLE, stored_window_info.dwStyle | WS_CAPTION );
 			SetWindowLong(EQhWnd, GWL_EXSTYLE, stored_window_info.dwExStyle);
-	#ifdef LOGGING
+#ifdef LOGGING
 			WriteLog("EQGAME: EQ Object found Null Dropping Fullscreen (1)");
-	#endif
+#endif
 			if (!IsIconic(EQhWnd) && window_info_stored) {
 				SetWindowPos(EQhWnd, HWND_TOP, stored_window_info.rcWindow.left, stored_window_info.rcWindow.top,
 					stored_window_info.rcWindow.right - stored_window_info.rcWindow.left, stored_window_info.rcWindow.bottom - stored_window_info.rcWindow.top,
